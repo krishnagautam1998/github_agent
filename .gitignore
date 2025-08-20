@@ -1,3 +1,6 @@
 *
 !/chatbot
 !.gitignore
+.env
+
+.env
