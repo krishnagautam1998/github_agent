@@ -73,168 +73,121 @@
 # except subprocess.CalledProcessError as e:
 #     raise SystemExit(f"❌ Git command failed: {e}")
 #################################################################################
-# import os
-# import subprocess
-# from github import Github, GithubException
-# from dotenv import load_dotenv
-
-# # Load environment variables
-# load_dotenv()
-
-# # Get GitHub token
-# GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-# if not GITHUB_TOKEN:
-#     raise ValueError("⚠️ Please set GITHUB_TOKEN in your .env file")
-
-# # Authenticate with GitHub
-# g = Github(GITHUB_TOKEN)
-# try:
-#     user = g.get_user()
-# except GithubException as e:
-#     raise SystemExit(f"❌ Failed to authenticate with GitHub: {e}")
-
-# # Ask user for folder path
-# folder_path = input("📂 Enter the folder path you want to push: ").strip()
-# if not os.path.exists(folder_path):
-#     raise SystemExit(f"❌ Folder '{folder_path}' does not exist.")
-
-# # Detect repo name from folder
-# repo_name = os.path.basename(os.path.normpath(folder_path))
-# print(f"📂 Using folder name as repo: {repo_name}")
-
-# # Check if repo exists, otherwise create it
-# try:
-#     repo = user.get_repo(repo_name)
-#     print(f"✅ Repo '{repo_name}' already exists: {repo.html_url}")
-# except GithubException:
-#     print(f"🚀 Creating new repo '{repo_name}'...")
-#     try:
-#         repo = user.create_repo(
-#             name=repo_name,
-#             description=f"Auto-created repo for {repo_name}",
-#             private=False
-#         )
-#         print(f"✅ Repo created: {repo.html_url}")
-#     except GithubException as e:
-#         raise SystemExit(f"❌ Failed to create repo: {e}")
-
-# # Change directory into folder
-# os.chdir(folder_path)
-
-# # Initialize Git if needed
-# if not os.path.exists(".git"):
-#     subprocess.run(["git", "init"], check=True)
-#     print("📌 Initialized Git repository locally.")
-
-# # Configure remote origin
-# subprocess.run(["git", "remote", "remove", "origin"], stderr=subprocess.DEVNULL)
-# subprocess.run(["git", "remote", "add", "origin", repo.clone_url], check=True)
-# print(f"📌 Remote 'origin' set to: {repo.clone_url}")
-
-# # Ask for commit message
-# commit_msg = input("💬 Enter commit message (or leave blank): ").strip()
-# if not commit_msg:
-#     commit_msg = f"Initial commit of {repo_name} via GitHub agent"
-
-# # Git add, commit, push
-# try:
-#     subprocess.run(["git", "add", "."], check=True)
-#     subprocess.run(["git", "commit", "-m", commit_msg], check=True)
-#     subprocess.run(["git", "branch", "-M", "main"], check=True)
-#     subprocess.run(["git", "push", "-u", "origin", "main", "--force"], check=True)
-#     print(f"🎉 Successfully pushed folder '{repo_name}' to {repo.html_url}")
-# except subprocess.CalledProcessError as e:
-#     raise SystemExit(f"❌ Git command failed: {e}")
-############################################################################
 import os
 import subprocess
-from github import Github, GithubException
+import requests
 from dotenv import load_dotenv
+from langchain.agents import initialize_agent, Tool, AgentType
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-# Load environment variables
+
+# Load API keys
 load_dotenv()
-
-# Get GitHub token
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-if not GITHUB_TOKEN:
-    raise ValueError("⚠️ Please set GITHUB_TOKEN in your .env file")
 
-# Ask user for folder path
-folder_path = input("📂 Enter folder path to push: ").strip()
 
-if not os.path.exists(folder_path):
-    raise FileNotFoundError(f"❌ Folder '{folder_path}' does not exist!")
-
-# Absolute path + repo name
-folder_path = os.path.abspath(folder_path)
-repo_name = os.path.basename(folder_path)
-print(f"📂 Using folder '{repo_name}' as GitHub repo name")
-
-# Authenticate with GitHub
-g = Github(GITHUB_TOKEN)
-try:
-    user = g.get_user()
-except GithubException as e:
-    raise SystemExit(f"❌ GitHub authentication failed: {e}")
-
-# Create repo if not exists
-try:
-    repo = user.get_repo(repo_name)
-    print(f"✅ Repo '{repo_name}' already exists: {repo.html_url}")
-except GithubException:
-    print(f"🚀 Creating repo '{repo_name}'...")
+def git_tool(command: str):
+    """Run Git command and return output."""
     try:
-        repo = user.create_repo(
-            name=repo_name,
-            description=f"Auto-created repo for {repo_name}",
-            private=False  # Change True if you want private repo
-        )
-        print(f"✅ Repo created: {repo.html_url}")
-    except GithubException as e:
-        raise SystemExit(f"❌ Failed to create repo: {e}")
+        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout.strip() or "✅ Command executed successfully"
+        else:
+            return f"⚠️ Error: {result.stderr.strip()}"
+    except Exception as e:
+        return f"❌ Exception: {str(e)}"
 
-# Go inside folder
-os.chdir(folder_path)
 
-# Create/Update .gitignore to protect sensitive files
-gitignore_path = os.path.join(folder_path, ".gitignore")
-with open(gitignore_path, "w") as f:
-    f.write(".env\n")
-    f.write("__pycache__/\n")
-    f.write("*.pyc\n")
-    f.write("*.pyo\n")
-    f.write("*.pyd\n")
-    f.write(".Python\n")
-    f.write("env/\n")
-    f.write("venv/\n")
-    f.write("*.sqlite3\n")
-    f.write(".DS_Store\n")
-print("🛡️  .gitignore created (secrets & junk files ignored).")
+def create_github_repo(username: str, repo_name: str):
+    """Create GitHub repo if not exists."""
+    url = f"https://api.github.com/repos/{username}/{repo_name}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
 
-# Init git if not already
-if not os.path.exists(".git"):
-    subprocess.run(["git", "init"], check=True)
-    print("📌 Initialized Git repository inside folder.")
+    # ✅ Check if repo exists
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        print(f"✅ Repo already exists: {repo_name}")
+        return True
 
-# Add or update remote origin
-try:
-    remotes = subprocess.check_output(["git", "remote"]).decode().splitlines()
-    if "origin" not in remotes:
-        subprocess.run(["git", "remote", "add", "origin", repo.clone_url], check=True)
-        print(f"📌 Added remote origin: {repo.clone_url}")
+    # ❌ If not exists, create it
+    print(f"📦 Repo not found, creating new repo: {repo_name}")
+    url = "https://api.github.com/user/repos"
+    data = {"name": repo_name, "private": False}
+    resp = requests.post(url, headers=headers, json=data)
+
+    if resp.status_code == 201:
+        print(f"✅ Repo created successfully: {repo_name}")
+        return True
     else:
-        subprocess.run(["git", "remote", "set-url", "origin", repo.clone_url], check=True)
-        print(f"ℹ️ Remote origin updated: {repo.clone_url}")
-except subprocess.CalledProcessError as e:
-    raise SystemExit(f"❌ Remote setup failed: {e}")
+        print(f"❌ Failed to create repo: {resp.text}")
+        return False
 
-# Git add, commit, push all files
-commit_msg = "Initial commit by GitHub agent"
-try:
-    subprocess.run(["git", "add", "."], check=True)
-    subprocess.run(["git", "commit", "--allow-empty", "-m", commit_msg], check=True)
-    subprocess.run(["git", "branch", "-M", "main"], check=True)
-    subprocess.run(["git", "push", "-u", "origin", "main", "--force"], check=True)
-    print(f"🎉 Successfully pushed ALL safe files from '{folder_path}' to {repo.html_url}")
-except subprocess.CalledProcessError as e:
-    raise SystemExit(f"❌ Git push failed: {e}")
+
+# Initialize Gemini LLM
+llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-pro",
+    temperature=0,
+    google_api_key=GOOGLE_API_KEY
+)
+
+tools = [
+    Tool(
+        name="GitHub Tool",
+        func=git_tool,
+        description="Run git commands like add, commit, push, pull"
+    )
+]
+
+agent = initialize_agent(
+    tools,
+    llm,
+    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+    verbose=True,
+    handle_parsing_errors=True,
+)
+
+
+if __name__ == "__main__":
+    folder = input("📂 Enter folder path to push: ").strip()
+    if not os.path.exists(folder):
+        print("❌ Invalid folder path")
+        exit(1)
+
+    os.chdir(folder)
+
+    username = input("👤 Enter your GitHub username: ").strip()
+    branch = input("🌿 Enter branch name (default: main): ").strip() or "main"
+
+    repo_name = os.path.basename(folder).replace(" ", "-")
+    print(f"📂 Using repo name: {repo_name}")
+
+    # ✅ Auto-create repo if not exists
+    if not create_github_repo(username, repo_name):
+        exit(1)
+
+    # ✅ Add .env to gitignore
+    with open(".gitignore", "a") as f:
+        f.write("\n.env\n")
+
+    git_tool("git rm --cached -f .env")
+
+    commands = [
+        "git init",
+        "git add .",
+        'git commit -m "Initial commit by GitHub agent"',
+        f"git branch -M {branch}",
+    ]
+
+    remotes = git_tool("git remote -v")
+    if "origin" in remotes:
+        print("🔄 Remote 'origin' already exists, removing it...")
+        git_tool("git remote remove origin")
+
+    commands.append(f"git remote add origin https://github.com/{username}/{repo_name}.git")
+    commands.append(f"git push -u origin {branch} --force")
+
+    for cmd in commands:
+        print(f"\n➡️ Running: {cmd}")
+        response = git_tool(cmd)
+        print(response)
