@@ -159,18 +159,25 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 if not GITHUB_TOKEN:
     raise ValueError("⚠️ Please set GITHUB_TOKEN in your .env file")
 
+# Ask user for folder path
+folder_path = input("📂 Enter folder path to push: ").strip()
+
+if not os.path.exists(folder_path):
+    raise FileNotFoundError(f"❌ Folder '{folder_path}' does not exist!")
+
+# Absolute path + repo name
+folder_path = os.path.abspath(folder_path)
+repo_name = os.path.basename(folder_path)
+print(f"📂 Using folder '{repo_name}' as GitHub repo name")
+
 # Authenticate with GitHub
 g = Github(GITHUB_TOKEN)
 try:
     user = g.get_user()
 except GithubException as e:
-    raise SystemExit(f"❌ Failed to authenticate with GitHub: {e}")
+    raise SystemExit(f"❌ GitHub authentication failed: {e}")
 
-# Detect current folder as repo name
-repo_name = os.path.basename(os.getcwd())
-print(f"📂 Using folder '{repo_name}' as GitHub repo name")
-
-# Create or get repo
+# Create repo if not exists
 try:
     repo = user.get_repo(repo_name)
     print(f"✅ Repo '{repo_name}' already exists: {repo.html_url}")
@@ -180,16 +187,34 @@ except GithubException:
         repo = user.create_repo(
             name=repo_name,
             description=f"Auto-created repo for {repo_name}",
-            private=False  # change True if you want private repo
+            private=False  # Change True if you want private repo
         )
         print(f"✅ Repo created: {repo.html_url}")
     except GithubException as e:
         raise SystemExit(f"❌ Failed to create repo: {e}")
 
-# Initialize git if not already
+# Go inside folder
+os.chdir(folder_path)
+
+# Create/Update .gitignore to protect sensitive files
+gitignore_path = os.path.join(folder_path, ".gitignore")
+with open(gitignore_path, "w") as f:
+    f.write(".env\n")
+    f.write("__pycache__/\n")
+    f.write("*.pyc\n")
+    f.write("*.pyo\n")
+    f.write("*.pyd\n")
+    f.write(".Python\n")
+    f.write("env/\n")
+    f.write("venv/\n")
+    f.write("*.sqlite3\n")
+    f.write(".DS_Store\n")
+print("🛡️  .gitignore created (secrets & junk files ignored).")
+
+# Init git if not already
 if not os.path.exists(".git"):
     subprocess.run(["git", "init"], check=True)
-    print("📌 Initialized Git repo locally.")
+    print("📌 Initialized Git repository inside folder.")
 
 # Add or update remote origin
 try:
@@ -210,6 +235,6 @@ try:
     subprocess.run(["git", "commit", "--allow-empty", "-m", commit_msg], check=True)
     subprocess.run(["git", "branch", "-M", "main"], check=True)
     subprocess.run(["git", "push", "-u", "origin", "main", "--force"], check=True)
-    print(f"🎉 Successfully pushed ALL files to {repo.html_url}")
+    print(f"🎉 Successfully pushed ALL safe files from '{folder_path}' to {repo.html_url}")
 except subprocess.CalledProcessError as e:
     raise SystemExit(f"❌ Git push failed: {e}")
